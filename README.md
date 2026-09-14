@@ -34,10 +34,32 @@ It then launches full-screen with its own icon, and opens with no network.
 | **Add** | Expense/income toggle, large amount field, category chips, optional note, date |
 | **Stats** | Every category with spending in the month: share of total and entry count |
 | **Budget** | A monthly limit per category, with a colour-coded bar — green under 80%, amber 80–99%, red at or over 100% |
+| **Needs** | The unavoidable categories and what each costs, totalled into a monthly minimum |
 | **All** | The full history, newest first |
 
 A red dot appears on the Budget tab whenever any category is at or over its
 limit for the selected month.
+
+### Budget vs. Needs
+
+They answer opposite questions and are stored separately. A **budget** is a
+ceiling — the most you want to spend on something. A **need** is a floor — what
+the month costs before anything optional. Needs adds up to the headline
+*minimum per month*, alongside what has actually been spent on those categories
+and what is left of the month's income once the minimum is covered.
+
+Add categories by tapping them in the picker at the bottom of the tab, then give
+each one an amount. Where there is history to go on, the row offers the typical
+monthly figure so variable bills like electricity or groceries can be priced
+from real numbers rather than guessed.
+
+That average divides by the months the category actually appears in, not by the
+size of the window. A bill first recorded this month costs what it costs —
+dividing it across two earlier months that predate the habit would understate
+the minimum, and understating is the one direction this screen must not err in.
+
+The minimum itself is a plan, not a measurement, so it does not change as you
+move between months; only the spent and left-over figures follow the period.
 
 ## Data
 
@@ -49,6 +71,10 @@ Two `localStorage` keys, both plain JSON:
 
 // "budgets" — monthly limit per category id
 { "food": 250, "cafe": 60 }
+
+// "necessary" — monthly cost of each unavoidable category. A key being present
+// is what marks it necessary, so 0 means "added, not priced yet", not "absent".
+{ "housing": 890, "utilities": 55, "gym": 40 }
 ```
 
 Both are read defensively on boot, so hand-editing them (or restoring an older

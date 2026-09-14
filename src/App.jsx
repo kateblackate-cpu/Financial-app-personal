@@ -5,15 +5,18 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
  * ------------------------------------------------------------------ */
 
 const CATEGORIES = [
-  { id: "housing", label: "Housing", emoji: "🏠" },
+  { id: "housing", label: "Rent & Housing", emoji: "🏠" },
+  { id: "utilities", label: "Utilities", emoji: "💡" },
   { id: "food", label: "Groceries & Food", emoji: "🥐" },
   { id: "cafe", label: "Cafés & Dining", emoji: "☕" },
   { id: "transport", label: "Transport", emoji: "🚇" },
+  { id: "health", label: "Health", emoji: "🌿" },
+  { id: "gym", label: "Gym & Sport", emoji: "🏋️" },
+  { id: "education", label: "Lessons & Courses", emoji: "📖" },
+  { id: "subscriptions", label: "Subscriptions", emoji: "📱" },
   { id: "beauty", label: "Beauty & Care", emoji: "✨" },
   { id: "fashion", label: "Fashion", emoji: "👗" },
   { id: "culture", label: "Culture & Art", emoji: "🎭" },
-  { id: "health", label: "Health", emoji: "🌿" },
-  { id: "subscriptions", label: "Subscriptions", emoji: "📱" },
   { id: "travel", label: "Travel", emoji: "✈️" },
   { id: "studio", label: "Studio & Work", emoji: "💼" },
   { id: "other", label: "Other", emoji: "•" },
@@ -24,6 +27,7 @@ const catOf = (id) => CAT[id] || CAT.other;
 
 const ENTRIES_KEY = "finance_entries";
 const BUDGETS_KEY = "budgets";
+const NECESSARY_KEY = "necessary";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -35,6 +39,7 @@ const TABS = [
   { id: "add", label: "Add", icon: "+" },
   { id: "stats", label: "Stats", icon: "◫" },
   { id: "budget", label: "Budget", icon: "◎" },
+  { id: "needs", label: "Needs", icon: "▣" },
   { id: "all", label: "All", icon: "≡" },
 ];
 
@@ -125,6 +130,27 @@ function loadBudgets() {
     for (const [id, v] of Object.entries(parsed)) {
       const n = Number(v);
       if (CAT[id] && Number.isFinite(n) && n > 0) out[id] = n;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Which categories count as unavoidable, and the amount each one costs in a
+ * normal month. A key being present is what marks the category as necessary —
+ * the amount may legitimately be 0 while it is still being filled in, so unlike
+ * budgets an empty value must not drop the entry.
+ */
+function loadNecessary() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NECESSARY_KEY) || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [id, v] of Object.entries(parsed)) {
+      const n = Number(v);
+      if (CAT[id]) out[id] = Number.isFinite(n) && n > 0 ? n : 0;
     }
     return out;
   } catch {
@@ -328,8 +354,8 @@ body {
 /* Spec asks for reveal-on-hover; touch devices have no hover, and this app
    lives on a phone — so only hide it where hovering is actually possible. */
 @media (hover: hover) and (pointer: fine) {
-  .del { opacity: 0; }
-  .entry:hover .del, .del:focus-visible { opacity: 1; }
+  .entry .del { opacity: 0; }
+  .entry:hover .del, .entry .del:focus-visible { opacity: 1; }
 }
 
 /* ---- add form ---- */
@@ -416,6 +442,38 @@ body {
 }
 .submit:active { opacity: .85; }
 
+/* ---- necessary expenses ---- */
+.hero {
+  margin-top: 14px;
+  padding: 16px 14px 15px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.hero-val {
+  font-size: 34px;
+  font-weight: 500;
+  color: var(--accent);
+  line-height: 1.1;
+  margin: 7px 0 6px;
+}
+.hero-note { font-size: 11px; color: var(--muted); }
+
+.chip-plus { color: var(--accent); font-size: 13px; margin-left: 1px; }
+
+.link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
 /* ---- budget ---- */
 .budget-row { padding: 14px 0; border-bottom: 1px solid var(--line); }
 .budget-row:last-child { border-bottom: none; }
@@ -437,7 +495,8 @@ body {
 .budget-foot {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  align-items: baseline;
+  gap: 10px;
   margin-top: 6px;
   font-size: 11px;
   color: var(--muted);
@@ -502,12 +561,13 @@ body {
 .nav button {
   position: relative;
   flex: 1;
+  min-width: 0;
   border: none;
   background: transparent;
   color: var(--muted);
   font-family: inherit;
   cursor: pointer;
-  padding: 10px 2px 11px;
+  padding: 10px 1px 11px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -516,7 +576,7 @@ body {
 }
 .nav button.on { color: var(--accent); }
 .nav .ico { font-size: 16px; line-height: 1; }
-.nav .lbl { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.nav .lbl { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .dot {
   position: absolute;
   top: 8px;
@@ -617,6 +677,7 @@ function EntryList({ entries, onDelete, empty }) {
 export default function App() {
   const [entries, setEntries] = useState(loadEntries);
   const [budgets, setBudgets] = useState(loadBudgets);
+  const [necessary, setNecessary] = useState(loadNecessary);
   const [tab, setTab] = useState("overview");
   const [period, setPeriod] = useState(() => {
     const d = new Date();
@@ -627,6 +688,7 @@ export default function App() {
 
   useEffect(() => save(ENTRIES_KEY, entries), [entries]);
   useEffect(() => save(BUDGETS_KEY, budgets), [budgets]);
+  useEffect(() => save(NECESSARY_KEY, necessary), [necessary]);
   useEffect(() => () => clearTimeout(flashTimer.current), []);
 
   const showFlash = useCallback((text, undo) => {
@@ -673,6 +735,35 @@ export default function App() {
     return { list: [...list].sort(byDateDesc), income, spent, balance: income - spent, byCat, cats };
   }, [entries, period]);
 
+  /**
+   * Typical monthly spend per category, over the three months ending at the
+   * selected one.
+   *
+   * The divisor is per category — how many of those months the category was
+   * actually recorded in — not how many months exist. A bill first tracked this
+   * month costs what it costs; dividing it by three because two earlier months
+   * predate the habit would understate the floor, which is the one direction
+   * this screen must never err in.
+   */
+  const avgByCat = useMemo(() => {
+    const window = new Set();
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(period.y, period.m - i, 1);
+      window.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+    const totals = {};
+    const monthsSeen = {};
+    for (const e of entries) {
+      const key = e.date.slice(0, 7);
+      if (e.type !== "expense" || !window.has(key)) continue;
+      totals[e.category] = (totals[e.category] || 0) + e.amount;
+      (monthsSeen[e.category] ||= new Set()).add(key);
+    }
+    const out = {};
+    for (const [id, total] of Object.entries(totals)) out[id] = total / monthsSeen[id].size;
+    return out;
+  }, [entries, period]);
+
   const anyOverBudget = useMemo(
     () => Object.entries(budgets).some(([id, limit]) => limit > 0 && (month.byCat[id]?.total || 0) >= limit),
     [budgets, month],
@@ -705,6 +796,23 @@ export default function App() {
     },
     [entries, showFlash],
   );
+
+  const markNecessary = useCallback((catId) => {
+    setNecessary((prev) => (catId in prev ? prev : { ...prev, [catId]: 0 }));
+  }, []);
+
+  const unmarkNecessary = useCallback((catId) => {
+    setNecessary((prev) => {
+      const next = { ...prev };
+      delete next[catId];
+      return next;
+    });
+  }, []);
+
+  const setNecessaryAmount = useCallback((catId, value) => {
+    const n = parseAmount(value);
+    setNecessary((prev) => ({ ...prev, [catId]: Number.isFinite(n) && n > 0 ? n : 0 }));
+  }, []);
 
   const setBudget = useCallback((catId, value) => {
     setBudgets((prev) => {
@@ -760,6 +868,19 @@ export default function App() {
             setPeriod={setPeriod}
             budgets={budgets}
             setBudget={setBudget}
+          />
+        )}
+        {tab === "needs" && (
+          <Necessary
+            month={month}
+            period={period}
+            years={years}
+            setPeriod={setPeriod}
+            necessary={necessary}
+            avgByCat={avgByCat}
+            onAdd={markNecessary}
+            onRemove={unmarkNecessary}
+            onAmount={setNecessaryAmount}
           />
         )}
         {tab === "all" && <AllEntries entries={sorted} onDelete={deleteEntry} />}
@@ -1095,7 +1216,148 @@ function BudgetRow({ category, limit, spent, onChange }) {
 }
 
 /* ------------------------------------------------------------------ *
- * 5. All
+ * 5. Necessary expenses — the monthly floor
+ * ------------------------------------------------------------------ */
+
+function Necessary({ month, period, years, setPeriod, necessary, avgByCat, onAdd, onRemove, onAmount }) {
+  const chosen = CATEGORIES.filter((c) => c.id in necessary);
+  const rest = CATEGORIES.filter((c) => !(c.id in necessary));
+
+  // The floor is what was planned, not what happened: it stays the same
+  // whichever month is on screen, while spent/left move with the period.
+  const minimum = chosen.reduce((sum, c) => sum + (necessary[c.id] || 0), 0);
+  const spent = chosen.reduce((sum, c) => sum + (month.byCat[c.id]?.total || 0), 0);
+  const unpriced = chosen.filter((c) => !necessary[c.id]).length;
+  const left = month.income - minimum;
+
+  return (
+    <>
+      <div className="masthead">
+        <h1 className="h1">Necessary</h1>
+        <span className="cap">{chosen.length} categories</span>
+      </div>
+
+      <PeriodPicker period={period} years={years} onChange={setPeriod} />
+
+      <div className="hero">
+        <div className="cap">Minimum per month</div>
+        <div className="hero-val">{money(minimum)}</div>
+        <div className="hero-note">
+          {chosen.length === 0
+            ? "Add the categories you cannot skip."
+            : unpriced > 0
+              ? `${unpriced} ${unpriced === 1 ? "category has" : "categories have"} no amount yet`
+              : "What it costs to keep the month running."}
+        </div>
+      </div>
+
+      <div className="cards">
+        <div className="card">
+          <div className="cap">Spent so far</div>
+          <div className="val" style={{ color: spent > minimum && minimum > 0 ? "var(--expense)" : "var(--text)" }}>
+            {money(spent)}
+          </div>
+        </div>
+        <div className="card">
+          <div className="cap">Left over</div>
+          <div className="val" style={{ color: month.income === 0 ? "var(--muted)" : left < 0 ? "var(--expense)" : "var(--income)" }}>
+            {month.income === 0 ? "—" : left < 0 ? `−${money(Math.abs(left))}` : money(left)}
+          </div>
+        </div>
+      </div>
+
+      <div className="section-title">Every month I need</div>
+      {chosen.length ? (
+        chosen.map((c) => (
+          <NecessaryRow
+            key={c.id}
+            category={c}
+            amount={necessary[c.id] || 0}
+            spent={month.byCat[c.id]?.total || 0}
+            average={avgByCat[c.id]}
+            onAmount={(v) => onAmount(c.id, v)}
+            onRemove={() => onRemove(c.id)}
+          />
+        ))
+      ) : (
+        <div className="empty">Nothing marked as necessary yet.</div>
+      )}
+
+      {rest.length > 0 && (
+        <>
+          <div className="section-title">Add a category</div>
+          <div className="chips">
+            {rest.map((c) => (
+              <button key={c.id} type="button" className="chip" onClick={() => onAdd(c.id)}>
+                <span aria-hidden="true">{c.emoji}</span>
+                {c.label}
+                <span className="chip-plus" aria-hidden="true">+</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function NecessaryRow({ category, amount, spent, average, onAmount, onRemove }) {
+  // Same local-draft reasoning as BudgetRow: a value derived from the parsed
+  // number would swallow the separator halfway through typing "40,50".
+  const [draft, setDraft] = useState(() => (amount > 0 ? String(amount).replace(".", ",") : ""));
+
+  const over = amount > 0 && spent > amount;
+  // Only worth offering when it would actually change the field.
+  const suggestion = average > 0 && Math.round(average * 100) / 100 !== amount ? Math.round(average * 100) / 100 : null;
+
+  function useAverage() {
+    const v = String(suggestion).replace(".", ",");
+    setDraft(v);
+    onAmount(v);
+  }
+
+  return (
+    <div className="budget-row">
+      <div className="budget-head">
+        <span aria-hidden="true">{category.emoji}</span>
+        <span className="budget-name">{category.label}</span>
+        <input
+          className="budget-input"
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder="—"
+          aria-label={`Monthly amount needed for ${category.label}`}
+          value={draft}
+          onChange={(e) => {
+            const v = sanitizeAmount(e.target.value);
+            setDraft(v);
+            onAmount(v);
+          }}
+        />
+        <button className="del" onClick={onRemove} aria-label={`Remove ${category.label} from necessary`} title="Remove">
+          ×
+        </button>
+      </div>
+      <div className="budget-foot">
+        <span style={{ color: over ? "var(--expense)" : undefined }}>
+          {spent > 0 ? `${money(spent)} spent this month` : "Nothing spent this month"}
+          {over ? ` · ${money(spent - amount)} above plan` : ""}
+        </span>
+        {suggestion ? (
+          <button className="link" onClick={useAverage}>
+            use average {money(suggestion)}
+          </button>
+        ) : (
+          <span />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 6. All
  * ------------------------------------------------------------------ */
 
 function AllEntries({ entries, onDelete }) {
