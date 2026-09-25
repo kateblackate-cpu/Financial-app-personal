@@ -138,23 +138,44 @@ function loadBudgets() {
 }
 
 /**
- * Which categories count as unavoidable, and the amount each one costs in a
- * normal month. A key being present is what marks the category as necessary —
- * the amount may legitimately be 0 while it is still being filled in, so unlike
- * budgets an empty value must not drop the entry.
+ * The recurring things a month costs, one row each:
+ *
+ *   { id, category: "subscriptions", label: "Claude", amount: 20 }
+ *
+ * A category can hold as many rows as it needs — several subscriptions, two
+ * language courses — so `label` is what tells them apart. An amount of 0 means
+ * "listed, not priced yet" and must survive, so unlike budgets an empty value
+ * never drops the row.
  */
 function loadNecessary() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(NECESSARY_KEY) || "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out = {};
-    for (const [id, v] of Object.entries(parsed)) {
-      const n = Number(v);
-      if (CAT[id]) out[id] = Number.isFinite(n) && n > 0 ? n : 0;
+    const parsed = JSON.parse(localStorage.getItem(NECESSARY_KEY) || "[]");
+
+    // The first version stored one amount per category, as { housing: 890 }.
+    // Migrate it to a single unlabelled row per category rather than dropping
+    // whatever had already been entered.
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.entries(parsed)
+        .filter(([id]) => CAT[id])
+        .map(([id, v], i) => ({
+          id: Date.now() + i,
+          category: id,
+          label: "",
+          amount: Number(v) > 0 ? Number(v) : 0,
+        }));
     }
-    return out;
+
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((it) => it && typeof it === "object" && CAT[it.category])
+      .map((it, i) => ({
+        id: Number.isFinite(Number(it.id)) ? Number(it.id) : Date.now() + i,
+        category: it.category,
+        label: typeof it.label === "string" ? it.label : "",
+        amount: Number(it.amount) > 0 ? Number(it.amount) : 0,
+      }));
   } catch {
-    return {};
+    return [];
   }
 }
 
@@ -459,6 +480,53 @@ body {
 .hero-note { font-size: 11px; color: var(--muted); }
 
 .chip-plus { color: var(--accent); font-size: 13px; margin-left: 1px; }
+
+.need-group { padding: 15px 0 14px; border-bottom: 1px solid var(--line); }
+.need-group:last-of-type { border-bottom: none; }
+.need-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.need-group-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.need-group-sum { font-size: 14px; font-weight: 500; white-space: nowrap; }
+
+.need-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.need-label, .need-amount {
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  color: var(--text);
+  font-family: inherit;
+  /* 16px keeps iOS from zooming the page in on focus */
+  font-size: 16px;
+  padding: 8px;
+  border-radius: 0;
+  min-width: 0;
+}
+.need-label { flex: 1; }
+.need-label::placeholder { color: var(--muted); }
+.need-amount { width: 88px; flex: none; text-align: right; }
+.need-label:focus, .need-amount:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+.need-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.need-foot-actions { display: flex; gap: 14px; }
 
 .link {
   border: none;
@@ -797,21 +865,16 @@ export default function App() {
     [entries, showFlash],
   );
 
-  const markNecessary = useCallback((catId) => {
-    setNecessary((prev) => (catId in prev ? prev : { ...prev, [catId]: 0 }));
+  const addNeed = useCallback((catId) => {
+    setNecessary((prev) => [...prev, { id: Date.now(), category: catId, label: "", amount: 0 }]);
   }, []);
 
-  const unmarkNecessary = useCallback((catId) => {
-    setNecessary((prev) => {
-      const next = { ...prev };
-      delete next[catId];
-      return next;
-    });
+  const updateNeed = useCallback((id, patch) => {
+    setNecessary((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   }, []);
 
-  const setNecessaryAmount = useCallback((catId, value) => {
-    const n = parseAmount(value);
-    setNecessary((prev) => ({ ...prev, [catId]: Number.isFinite(n) && n > 0 ? n : 0 }));
+  const removeNeed = useCallback((id) => {
+    setNecessary((prev) => prev.filter((it) => it.id !== id));
   }, []);
 
   const setBudget = useCallback((catId, value) => {
@@ -876,11 +939,11 @@ export default function App() {
             period={period}
             years={years}
             setPeriod={setPeriod}
-            necessary={necessary}
+            items={necessary}
             avgByCat={avgByCat}
-            onAdd={markNecessary}
-            onRemove={unmarkNecessary}
-            onAmount={setNecessaryAmount}
+            onAdd={addNeed}
+            onUpdate={updateNeed}
+            onRemove={removeNeed}
           />
         )}
         {tab === "all" && <AllEntries entries={sorted} onDelete={deleteEntry} />}
@@ -1219,22 +1282,43 @@ function BudgetRow({ category, limit, spent, onChange }) {
  * 5. Necessary expenses — the monthly floor
  * ------------------------------------------------------------------ */
 
-function Necessary({ month, period, years, setPeriod, necessary, avgByCat, onAdd, onRemove, onAmount }) {
-  const chosen = CATEGORIES.filter((c) => c.id in necessary);
-  const rest = CATEGORIES.filter((c) => !(c.id in necessary));
+function Necessary({ month, period, years, setPeriod, items, avgByCat, onAdd, onUpdate, onRemove }) {
+  /*
+   * Rows are grouped by category, and the groups are ordered by when the
+   * category was first added rather than by the master category list — a
+   * category tapped in the picker then appears at the bottom, right where the
+   * tap happened, instead of silently slotting in somewhere up the page.
+   */
+  const groups = useMemo(() => {
+    const byCat = new Map();
+    for (const it of items) {
+      if (!byCat.has(it.category)) byCat.set(it.category, []);
+      byCat.get(it.category).push(it);
+    }
+    return [...byCat.entries()]
+      .map(([id, rows]) => ({
+        cat: catOf(id),
+        rows,
+        addedAt: Math.min(...rows.map((r) => r.id)),
+        planned: rows.reduce((sum, r) => sum + r.amount, 0),
+        spent: month.byCat[id]?.total || 0,
+      }))
+      .sort((a, b) => a.addedAt - b.addedAt);
+  }, [items, month]);
 
   // The floor is what was planned, not what happened: it stays the same
   // whichever month is on screen, while spent/left move with the period.
-  const minimum = chosen.reduce((sum, c) => sum + (necessary[c.id] || 0), 0);
-  const spent = chosen.reduce((sum, c) => sum + (month.byCat[c.id]?.total || 0), 0);
-  const unpriced = chosen.filter((c) => !necessary[c.id]).length;
+  const minimum = items.reduce((sum, it) => sum + it.amount, 0);
+  const spent = groups.reduce((sum, g) => sum + g.spent, 0);
+  const unpriced = items.filter((it) => !it.amount).length;
   const left = month.income - minimum;
+  const rest = CATEGORIES.filter((c) => !items.some((it) => it.category === c.id));
 
   return (
     <>
       <div className="masthead">
         <h1 className="h1">Necessary</h1>
-        <span className="cap">{chosen.length} categories</span>
+        <span className="cap">{items.length} {items.length === 1 ? "item" : "items"}</span>
       </div>
 
       <PeriodPicker period={period} years={years} onChange={setPeriod} />
@@ -1243,10 +1327,10 @@ function Necessary({ month, period, years, setPeriod, necessary, avgByCat, onAdd
         <div className="cap">Minimum per month</div>
         <div className="hero-val">{money(minimum)}</div>
         <div className="hero-note">
-          {chosen.length === 0
-            ? "Add the categories you cannot skip."
+          {items.length === 0
+            ? "Add the things you cannot skip."
             : unpriced > 0
-              ? `${unpriced} ${unpriced === 1 ? "category has" : "categories have"} no amount yet`
+              ? `${unpriced} ${unpriced === 1 ? "item has" : "items have"} no amount yet`
               : "What it costs to keep the month running."}
         </div>
       </div>
@@ -1261,26 +1345,25 @@ function Necessary({ month, period, years, setPeriod, necessary, avgByCat, onAdd
         <div className="card">
           <div className="cap">Left over</div>
           <div className="val" style={{ color: month.income === 0 ? "var(--muted)" : left < 0 ? "var(--expense)" : "var(--income)" }}>
-            {month.income === 0 ? "—" : left < 0 ? `−${money(Math.abs(left))}` : money(left)}
+            {month.income === 0 ? "—" : left < 0 ? `\u2212${money(Math.abs(left))}` : money(left)}
           </div>
         </div>
       </div>
 
       <div className="section-title">Every month I need</div>
-      {chosen.length ? (
-        chosen.map((c) => (
-          <NecessaryRow
-            key={c.id}
-            category={c}
-            amount={necessary[c.id] || 0}
-            spent={month.byCat[c.id]?.total || 0}
-            average={avgByCat[c.id]}
-            onAmount={(v) => onAmount(c.id, v)}
-            onRemove={() => onRemove(c.id)}
+      {groups.length ? (
+        groups.map((g) => (
+          <NeedGroup
+            key={g.cat.id}
+            group={g}
+            average={avgByCat[g.cat.id]}
+            onAdd={() => onAdd(g.cat.id)}
+            onUpdate={onUpdate}
+            onRemove={onRemove}
           />
         ))
       ) : (
-        <div className="empty">Nothing marked as necessary yet.</div>
+        <div className="empty">Nothing listed as necessary yet.</div>
       )}
 
       {rest.length > 0 && (
@@ -1301,57 +1384,102 @@ function Necessary({ month, period, years, setPeriod, necessary, avgByCat, onAdd
   );
 }
 
-function NecessaryRow({ category, amount, spent, average, onAmount, onRemove }) {
-  // Same local-draft reasoning as BudgetRow: a value derived from the parsed
-  // number would swallow the separator halfway through typing "40,50".
-  const [draft, setDraft] = useState(() => (amount > 0 ? String(amount).replace(".", ",") : ""));
+function NeedGroup({ group, average, onAdd, onUpdate, onRemove }) {
+  const { cat, rows, planned, spent } = group;
+  const over = planned > 0 && spent > planned;
 
-  const over = amount > 0 && spent > amount;
-  // Only worth offering when it would actually change the field.
-  const suggestion = average > 0 && Math.round(average * 100) / 100 !== amount ? Math.round(average * 100) / 100 : null;
-
-  function useAverage() {
-    const v = String(suggestion).replace(".", ",");
-    setDraft(v);
-    onAmount(v);
-  }
+  // Spending is tracked per category, not per row, so the historical average
+  // can only fill in a category that holds a single row. With several rows the
+  // split between them is the user's own and no average could guess it.
+  const single = rows.length === 1 ? rows[0] : null;
+  const rounded = average > 0 ? Math.round(average * 100) / 100 : 0;
+  const suggestion = single && rounded && rounded !== single.amount ? rounded : null;
 
   return (
-    <div className="budget-row">
-      <div className="budget-head">
-        <span aria-hidden="true">{category.emoji}</span>
-        <span className="budget-name">{category.label}</span>
-        <input
-          className="budget-input"
-          type="text"
-          inputMode="decimal"
-          autoComplete="off"
-          placeholder="—"
-          aria-label={`Monthly amount needed for ${category.label}`}
-          value={draft}
-          onChange={(e) => {
-            const v = sanitizeAmount(e.target.value);
-            setDraft(v);
-            onAmount(v);
-          }}
-        />
-        <button className="del" onClick={onRemove} aria-label={`Remove ${category.label} from necessary`} title="Remove">
-          ×
-        </button>
+    <div className="need-group">
+      <div className="need-group-head">
+        <span aria-hidden="true">{cat.emoji}</span>
+        <span className="need-group-name">{cat.label}</span>
+        <span className="need-group-sum">{money(planned)}</span>
       </div>
-      <div className="budget-foot">
+
+      {rows.map((row) => (
+        <NeedRow
+          key={row.id}
+          row={row}
+          category={cat}
+          onUpdate={onUpdate}
+          onRemove={() => onRemove(row.id)}
+        />
+      ))}
+
+      <div className="need-foot">
+        <span className="need-foot-actions">
+          <button className="link" onClick={onAdd}>+ add another</button>
+          {suggestion ? (
+            <button className="link" onClick={() => onUpdate(single.id, { amount: suggestion })}>
+              use average {money(suggestion)}
+            </button>
+          ) : null}
+        </span>
         <span style={{ color: over ? "var(--expense)" : undefined }}>
           {spent > 0 ? `${money(spent)} spent this month` : "Nothing spent this month"}
-          {over ? ` · ${money(spent - amount)} above plan` : ""}
+          {over ? ` \u00b7 ${money(spent - planned)} above plan` : ""}
         </span>
-        {suggestion ? (
-          <button className="link" onClick={useAverage}>
-            use average {money(suggestion)}
-          </button>
-        ) : (
-          <span />
-        )}
       </div>
+    </div>
+  );
+}
+
+function NeedRow({ row, category, onUpdate, onRemove }) {
+  /*
+   * The amount keeps a local draft so a half-typed "12," survives the round
+   * trip — a value derived from the parsed number would re-render as "12" and
+   * swallow the separator mid-keystroke. The label needs no such care, so it
+   * stays controlled straight from state.
+   */
+  const [draft, setDraft] = useState(() => (row.amount > 0 ? String(row.amount).replace(".", ",") : ""));
+
+  // A row filled from the average is written to state without going through
+  // this field, so mirror it back into the draft when that happens.
+  const lastAmount = useRef(row.amount);
+  useEffect(() => {
+    if (row.amount !== lastAmount.current) {
+      lastAmount.current = row.amount;
+      if (parseAmount(draft) !== row.amount) setDraft(row.amount > 0 ? String(row.amount).replace(".", ",") : "");
+    }
+  }, [row.amount, draft]);
+
+  return (
+    <div className="need-row">
+      <input
+        className="need-label"
+        type="text"
+        autoComplete="off"
+        placeholder="Name (optional)"
+        aria-label={`Name for this ${category.label} item`}
+        value={row.label}
+        onChange={(e) => onUpdate(row.id, { label: e.target.value })}
+      />
+      <input
+        className="need-amount"
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        placeholder="—"
+        aria-label={`Monthly amount for ${row.label || category.label}`}
+        value={draft}
+        onChange={(e) => {
+          const v = sanitizeAmount(e.target.value);
+          setDraft(v);
+          const n = parseAmount(v);
+          lastAmount.current = Number.isFinite(n) && n > 0 ? n : 0;
+          onUpdate(row.id, { amount: lastAmount.current });
+        }}
+      />
+      <button className="del" onClick={onRemove} aria-label={`Remove ${row.label || category.label}`} title="Remove">
+        ×
+      </button>
     </div>
   );
 }

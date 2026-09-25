@@ -34,7 +34,7 @@ It then launches full-screen with its own icon, and opens with no network.
 | **Add** | Expense/income toggle, large amount field, category chips, optional note, date |
 | **Stats** | Every category with spending in the month: share of total and entry count |
 | **Budget** | A monthly limit per category, with a colour-coded bar — green under 80%, amber 80–99%, red at or over 100% |
-| **Needs** | The unavoidable categories and what each costs, totalled into a monthly minimum |
+| **Needs** | The unavoidable things and what each costs, totalled into a monthly minimum |
 | **All** | The full history, newest first |
 
 A red dot appears on the Budget tab whenever any category is at or over its
@@ -48,10 +48,25 @@ the month costs before anything optional. Needs adds up to the headline
 *minimum per month*, alongside what has actually been spent on those categories
 and what is left of the month's income once the minimum is covered.
 
-Add categories by tapping them in the picker at the bottom of the tab, then give
-each one an amount. Where there is history to go on, the row offers the typical
-monthly figure so variable bills like electricity or groceries can be priced
-from real numbers rather than guessed.
+Add a category by tapping it in the picker at the bottom of the tab. Each
+category holds as many rows as it needs, and every row can be named, so several
+things that share a category stay separate and legible:
+
+```
+📱 Subscriptions                43,49 €
+   Claude                        20,00
+   Photoshop                     12,50
+   Spotify                       10,99
+```
+
+The name is optional — rent or electricity rarely needs one — and each category
+shows its own subtotal alongside what was actually spent in it this month.
+
+Where there is history to go on, a category offers the typical monthly figure so
+variable bills like electricity or groceries can be priced from real numbers
+rather than guessed. That offer only appears for a category holding a single
+row: spending is recorded per category, not per row, so with several rows no
+average could know how to split itself between them.
 
 That average divides by the months the category actually appears in, not by the
 size of the window. A bill first recorded this month costs what it costs —
@@ -72,10 +87,19 @@ Two `localStorage` keys, both plain JSON:
 // "budgets" — monthly limit per category id
 { "food": 250, "cafe": 60 }
 
-// "necessary" — monthly cost of each unavoidable category. A key being present
-// is what marks it necessary, so 0 means "added, not priced yet", not "absent".
-{ "housing": 890, "utilities": 55, "gym": 40 }
+// "necessary" — one row per recurring thing. A category may hold several rows;
+// `label` is what tells them apart. 0 means "listed, not priced yet".
+[
+  { "id": 1749427200000, "category": "subscriptions", "label": "Claude", "amount": 20 },
+  { "id": 1749427200001, "category": "subscriptions", "label": "Photoshop", "amount": 12.5 },
+  { "id": 1749427200002, "category": "housing", "label": "", "amount": 890 }
+]
 ```
+
+An earlier version stored `necessary` as one amount per category
+(`{ "housing": 890 }`). That shape is migrated to a single unlabelled row per
+category on load and written back in the new form, so nothing entered under it
+is lost.
 
 Both are read defensively on boot, so hand-editing them (or restoring an older
 export) cannot crash the app — malformed records are dropped, unknown
