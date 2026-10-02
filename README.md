@@ -40,6 +40,31 @@ It then launches full-screen with its own icon, and opens with no network.
 A red dot appears on the Budget tab whenever any category is at or over its
 limit for the selected month.
 
+### Balance carries over
+
+Income and Spent describe the selected month on its own. **Balance** does not —
+it is the money actually on hand, so whatever was left at the end of the
+previous month rolls into the next one. A fresh month with no income recorded
+yet shows what you are still carrying, not zero.
+
+The line under the cards splits it out:
+
+```
+Brought forward  2 300,00 €        This month  −300,00 €
+```
+
+"Brought forward" is every entry dated before the selected month, netted. Only
+entries before it count, so moving back through the year shows each month's
+balance as it stood at the time, and an entry dated in the future never leaks
+backwards into an earlier month.
+
+Needs uses the same figure: *Left over* is measured against money on hand
+(brought forward plus this month's income) rather than this month's income
+alone, so a month whose pay has not landed yet does not pretend the floor is
+uncovered while last month's leftover is sitting right there. It still reads
+`—` when there is no income recorded anywhere, since there is then nothing to
+measure against.
+
 ### Budget vs. Needs
 
 They answer opposite questions and are stored separately. A **budget** is a

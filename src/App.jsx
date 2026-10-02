@@ -50,6 +50,9 @@ const TABS = [
 const eurFmt = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const money = (n) => eurFmt.format(Number.isFinite(n) ? n : 0);
 
+/** Same, but always carrying its sign — for deltas, where +0 reads as noise. */
+const signed = (n) => (n > 0 ? `+${money(n)}` : n < 0 ? `\u2212${money(Math.abs(n))}` : money(0));
+
 /** Local-time YYYY-MM-DD. `toISOString()` is UTC and would file a late-evening
  *  entry under tomorrow's date for anyone east of Greenwich. */
 function todayISO(d = new Date()) {
@@ -305,6 +308,17 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.carry {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 3px 14px;
+  margin-top: 9px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.carry b { font-weight: 400; color: var(--text); }
 
 /* ---- bars ---- */
 .bar-row { margin-bottom: 13px; }
@@ -832,6 +846,31 @@ export default function App() {
     return out;
   }, [entries, period]);
 
+  /**
+   * Everything that happened before the selected month, netted out. This is
+   * what was still on hand when the month opened — without it a fresh month
+   * reads as a balance of zero, which is only true if the previous month ended
+   * at exactly nothing.
+   *
+   * Dates are ISO, so a plain string compare orders them correctly, and
+   * anything dated inside or after the selected month is excluded.
+   */
+  const carry = useMemo(() => {
+    const monthStart = `${period.y}-${String(period.m + 1).padStart(2, "0")}-01`;
+    let balance = 0;
+    let sawIncome = false;
+    for (const e of entries) {
+      if (e.date >= monthStart) continue;
+      if (e.type === "income") {
+        balance += e.amount;
+        sawIncome = true;
+      } else {
+        balance -= e.amount;
+      }
+    }
+    return { balance, sawIncome };
+  }, [entries, period]);
+
   const anyOverBudget = useMemo(
     () => Object.entries(budgets).some(([id, limit]) => limit > 0 && (month.byCat[id]?.total || 0) >= limit),
     [budgets, month],
@@ -917,6 +956,7 @@ export default function App() {
             period={period}
             years={years}
             setPeriod={setPeriod}
+            carry={carry}
             recent={sorted.slice(0, 5)}
             onDelete={deleteEntry}
           />
@@ -940,6 +980,7 @@ export default function App() {
             years={years}
             setPeriod={setPeriod}
             items={necessary}
+            carry={carry}
             avgByCat={avgByCat}
             onAdd={addNeed}
             onUpdate={updateNeed}
@@ -973,8 +1014,11 @@ export default function App() {
  * 1. Overview
  * ------------------------------------------------------------------ */
 
-function Overview({ month, period, years, setPeriod, recent, onDelete }) {
+function Overview({ month, period, years, setPeriod, carry, recent, onDelete }) {
   const top = month.cats.slice(0, 5);
+  // Income and Spent describe the month itself; Balance is what is actually on
+  // hand, which means last month's leftover rolled in.
+  const balance = carry.balance + month.balance;
   return (
     <>
       <div className="masthead">
@@ -995,10 +1039,23 @@ function Overview({ month, period, years, setPeriod, recent, onDelete }) {
         </div>
         <div className="card">
           <div className="cap">Balance</div>
-          <div className="val" style={{ color: month.balance < 0 ? "var(--expense)" : "var(--text)" }}>
-            {money(month.balance)}
+          <div className="val" style={{ color: balance < 0 ? "var(--expense)" : "var(--text)" }}>
+            {money(balance)}
           </div>
         </div>
+      </div>
+
+      <div className="carry">
+        <span>
+          Brought forward{" "}
+          <b style={{ color: carry.balance < 0 ? "var(--expense)" : undefined }}>{money(carry.balance)}</b>
+        </span>
+        <span>
+          This month{" "}
+          <b style={{ color: month.balance < 0 ? "var(--expense)" : month.balance > 0 ? "var(--income)" : undefined }}>
+            {signed(month.balance)}
+          </b>
+        </span>
       </div>
 
       <div className="section-title">Top categories</div>
@@ -1282,7 +1339,7 @@ function BudgetRow({ category, limit, spent, onChange }) {
  * 5. Necessary expenses — the monthly floor
  * ------------------------------------------------------------------ */
 
-function Necessary({ month, period, years, setPeriod, items, avgByCat, onAdd, onUpdate, onRemove }) {
+function Necessary({ month, period, years, setPeriod, items, carry, avgByCat, onAdd, onUpdate, onRemove }) {
   /*
    * Rows are grouped by category, and the groups are ordered by when the
    * category was first added rather than by the master category list — a
@@ -1311,7 +1368,13 @@ function Necessary({ month, period, years, setPeriod, items, avgByCat, onAdd, on
   const minimum = items.reduce((sum, it) => sum + it.amount, 0);
   const spent = groups.reduce((sum, g) => sum + g.spent, 0);
   const unpriced = items.filter((it) => !it.amount).length;
-  const left = month.income - minimum;
+
+  // Against money actually on hand, not just this month's income — otherwise a
+  // month whose income has not landed yet looks like it cannot cover the floor
+  // while last month's leftover is sitting right there.
+  const available = carry.balance + month.income;
+  const left = available - minimum;
+  const knowsIncome = carry.sawIncome || month.income > 0;
   const rest = CATEGORIES.filter((c) => !items.some((it) => it.category === c.id));
 
   return (
@@ -1344,11 +1407,22 @@ function Necessary({ month, period, years, setPeriod, items, avgByCat, onAdd, on
         </div>
         <div className="card">
           <div className="cap">Left over</div>
-          <div className="val" style={{ color: month.income === 0 ? "var(--muted)" : left < 0 ? "var(--expense)" : "var(--income)" }}>
-            {month.income === 0 ? "—" : left < 0 ? `\u2212${money(Math.abs(left))}` : money(left)}
+          <div className="val" style={{ color: !knowsIncome ? "var(--muted)" : left < 0 ? "var(--expense)" : "var(--income)" }}>
+            {knowsIncome ? money(left) : "—"}
           </div>
         </div>
       </div>
+
+      {knowsIncome && carry.balance !== 0 && (
+        <div className="carry">
+          <span>
+            Brought forward <b>{money(carry.balance)}</b>
+          </span>
+          <span>
+            Income this month <b>{money(month.income)}</b>
+          </span>
+        </div>
+      )}
 
       <div className="section-title">Every month I need</div>
       {groups.length ? (
