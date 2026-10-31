@@ -32,13 +32,26 @@ It then launches full-screen with its own icon, and opens with no network.
 | --- | --- |
 | **Overview** | Month/year picker, Income / Spent / Balance cards, top 5 spending categories, 5 most recent entries |
 | **Add** | Expense/income toggle, large amount field, category chips, optional note, date |
-| **Stats** | Every category with spending in the month: share of total and entry count |
+| **Stats** | Every category with spending in the month: share of total, entry count, and the entries themselves on tap |
 | **Budget** | A monthly limit per category, with a colour-coded bar — green under 80%, amber 80–99%, red at or over 100% |
 | **Needs** | The unavoidable things and what each costs, totalled into a monthly minimum |
 | **All** | The full history, newest first |
 
 A red dot appears on the Budget tab whenever any category is at or over its
 limit for the selected month.
+
+### Reading a finished month
+
+Stats answers "where did it go" for the selected month. Categories are listed
+biggest first with their share of total spending, and tapping one opens the
+entries behind that figure — date, note and amount — so a number that looks
+wrong can be traced to the line that caused it. Inside a category the entries
+are ordered largest first, since opening it is usually asking what made it so
+big. Several categories can be open at once, and *expand all* opens the lot for
+a full end-of-month read.
+
+The breakdown covers spending only; income is summed in the card above it.
+Stats is read-only — entries are edited or deleted from All.
 
 ### Balance carries over
 

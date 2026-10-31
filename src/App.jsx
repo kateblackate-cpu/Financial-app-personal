@@ -50,6 +50,10 @@ const TABS = [
 const eurFmt = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const money = (n) => eurFmt.format(Number.isFinite(n) ? n : 0);
 
+const pctFmt = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+/** Percent with the same decimal separator as every other number on screen. */
+const percent = (n) => `${pctFmt.format(Number.isFinite(n) ? n : 0)}%`;
+
 /** Same, but always carrying its sign — for deltas, where +0 reads as noise. */
 const signed = (n) => (n > 0 ? `+${money(n)}` : n < 0 ? `\u2212${money(Math.abs(n))}` : money(0));
 
@@ -66,6 +70,13 @@ function fmtDate(iso) {
   const [y, m, d] = String(iso).split("-").map(Number);
   if (!y || !m || !d) return iso;
   return `${d} ${MONTHS[m - 1].slice(0, 3)} ${y}`;
+}
+
+/** Day and month only — the year is redundant inside a single month's list. */
+function fmtShortDate(iso) {
+  const [, m, d] = String(iso).split("-").map(Number);
+  if (!m || !d) return iso;
+  return `${d} ${MONTHS[m - 1].slice(0, 3)}`;
 }
 
 const ymOf = (iso) => {
@@ -338,6 +349,53 @@ body {
   overflow: hidden;
 }
 .bar-fill { height: 100%; transition: width .28s ease; }
+
+/* ---- expandable category stats ---- */
+.section-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-row .section-title { margin-bottom: 10px; }
+
+.cat-toggle {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.caret {
+  flex: none;
+  display: inline-block;
+  font-size: 9px;
+  color: var(--muted);
+  transition: transform .18s ease;
+}
+.caret.open { transform: rotate(90deg); }
+
+.cat-detail {
+  margin-top: 9px;
+  padding-left: 11px;
+  border-left: 2px solid var(--line-2);
+}
+.cat-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.cat-line-date { flex: none; color: var(--muted); font-size: 11px; }
+.cat-line-note {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cat-line-amt { font-weight: 500; white-space: nowrap; }
 
 /* ---- entries ---- */
 .entry {
@@ -804,14 +862,22 @@ export default function App() {
         income += e.amount;
       } else {
         spent += e.amount;
-        const slot = byCat[e.category] || (byCat[e.category] = { total: 0, count: 0 });
+        const slot = byCat[e.category] || (byCat[e.category] = { total: 0, count: 0, entries: [] });
         slot.total += e.amount;
         slot.count += 1;
+        slot.entries.push(e);
       }
     }
 
     const cats = Object.entries(byCat)
-      .map(([id, v]) => ({ id, ...v, pct: spent > 0 ? (v.total / spent) * 100 : 0 }))
+      .map(([id, v]) => ({
+        id,
+        ...v,
+        // Biggest first: opening a category is asking "what made this so large",
+        // and the answer should be the first line, not somewhere down a list.
+        entries: [...v.entries].sort((a, b) => b.amount - a.amount || (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id)),
+        pct: spent > 0 ? (v.total / spent) * 100 : 0,
+      }))
       .sort((a, b) => b.total - a.total);
 
     return { list: [...list].sort(byDateDesc), income, spent, balance: income - spent, byCat, cats };
@@ -1186,6 +1252,20 @@ function AddEntry({ onAdd, onInvalid }) {
  * ------------------------------------------------------------------ */
 
 function Stats({ month, period, years, setPeriod }) {
+  // Which categories are expanded. Transient view state, so it is not stored;
+  // several can be open at once, which is the point when comparing two of them.
+  const [open, setOpen] = useState(() => new Set());
+
+  const allOpen = month.cats.length > 0 && month.cats.every((c) => open.has(c.id));
+
+  const toggle = (id) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   return (
     <>
       <div className="masthead">
@@ -1206,21 +1286,48 @@ function Stats({ month, period, years, setPeriod }) {
         </div>
       </div>
 
-      <div className="section-title">By category</div>
+      <div className="section-row">
+        <div className="section-title">By category</div>
+        {month.cats.length > 0 && (
+          <button className="link" onClick={() => setOpen(allOpen ? new Set() : new Set(month.cats.map((c) => c.id)))}>
+            {allOpen ? "collapse all" : "expand all"}
+          </button>
+        )}
+      </div>
+
       {month.cats.length ? (
-        month.cats.map((c) => (
-          <div className="bar-row" key={c.id}>
-            <div className="bar-head">
-              <span className="name">{catOf(c.id).emoji} {catOf(c.id).label}</span>
-              <span className="amt">{money(c.total)}</span>
+        month.cats.map((c) => {
+          const cat = catOf(c.id);
+          const isOpen = open.has(c.id);
+          return (
+            <div className="bar-row" key={c.id}>
+              <button className="cat-toggle" onClick={() => toggle(c.id)} aria-expanded={isOpen}>
+                <div className="bar-head">
+                  <span className="name">{cat.emoji} {cat.label}</span>
+                  <span className="amt">{money(c.total)}</span>
+                  <span className={`caret${isOpen ? " open" : ""}`} aria-hidden="true">▸</span>
+                </div>
+                <Bar pct={c.pct} color="var(--accent)" />
+                <div className="budget-foot">
+                  <span>{percent(c.pct)} of spending</span>
+                  <span>{c.count} {c.count === 1 ? "entry" : "entries"}</span>
+                </div>
+              </button>
+
+              {isOpen && (
+                <div className="cat-detail">
+                  {c.entries.map((e) => (
+                    <div className="cat-line" key={e.id}>
+                      <span className="cat-line-date">{fmtShortDate(e.date)}</span>
+                      <span className="cat-line-note">{e.note || cat.label}</span>
+                      <span className="cat-line-amt">{money(e.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <Bar pct={c.pct} color="var(--accent)" />
-            <div className="budget-foot">
-              <span>{c.pct.toFixed(1)}% of spending</span>
-              <span>{c.count} {c.count === 1 ? "entry" : "entries"}</span>
-            </div>
-          </div>
-        ))
+          );
+        })
       ) : (
         <div className="empty">No spending recorded this month.</div>
       )}
